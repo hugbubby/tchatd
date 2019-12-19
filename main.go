@@ -22,23 +22,35 @@ import (
 )
 
 func main() {
-	//Load configuration file from disk
+
+	//Load configuration file from disk, or generate it if needed
 	conf, err := func() (Config, error) {
 		var config Config
+		newCookie := func() error {
+			b := make([]byte, 32)
+			_, err := rand.Read(b)
+			if err == nil {
+				config.ReadCookie = base64.RawStdEncoding.EncodeToString(b)
+				var b []byte
+				b, err = json.Marshal(config)
+				if err == nil {
+					err = ioutil.WriteFile(ConfigPath("config.json"), b, 0600)
+				}
+			}
+			return err
+		}
 		b, err := ioutil.ReadFile(ConfigPath("config.json"))
 		if err == nil {
 			err = json.Unmarshal(b, &config)
 			if err == nil && config.ReadCookie == "" {
-				b := make([]byte, 32)
-				_, err = rand.Read(b)
-				if err == nil {
-					config.ReadCookie = base64.RawStdEncoding.EncodeToString(b)
-					var b []byte
-					b, err = json.Marshal(config)
-					if err == nil {
-						err = ioutil.WriteFile(ConfigPath("config.json"), b, 0600)
-					}
-				}
+				err = newCookie()
+			}
+		} else if os.IsNotExist(err) {
+			if err = os.MkdirAll(ConfigPath("."), 755); err == nil {
+				config.ServerAddress = "127.0.0.1:29965"
+				config.Tor.ProxyAddress = "127.0.0.1:9050"
+				config.Tor.ControllerAddress = "127.0.0.1:9051"
+				err = newCookie()
 			}
 		}
 		return config, err
@@ -196,13 +208,13 @@ func (r readHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	} else {
 		if mtype, p, err := conn.ReadMessage(); err != nil {
 			log.Println("failed to read cookie from websocket conn at", conn.RemoteAddr(), ":", err)
-            conn.Close()
+			conn.Close()
 		} else if mtype != websocket.TextMessage || !reflect.DeepEqual(p, []byte(r.cookie)) {
 			conn.WriteMessage(websocket.TextMessage, []byte("denied"))
-            conn.Close()
+			conn.Close()
 		} else {
 			conn.WriteMessage(websocket.TextMessage, []byte("accepted"))
-            r.hub.register(conn)
+			r.hub.register(conn)
 		}
 	}
 }
