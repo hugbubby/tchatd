@@ -46,7 +46,7 @@ func main() {
 				err = newCookie()
 			}
 		} else if os.IsNotExist(err) {
-			if err = os.MkdirAll(ConfigPath("."), 755); err == nil {
+			if err = os.MkdirAll(ConfigPath("."), 0755); err == nil {
 				config.ServerAddress = "127.0.0.1:29965"
 				config.Tor.ProxyAddress = "127.0.0.1:9050"
 				config.Tor.ControllerAddress = "127.0.0.1:9051"
@@ -131,7 +131,7 @@ func main() {
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error initializing tor hidden service"))
 	}
-	onion.Ports[80] = conf.ServerAddress
+    onion.Ports = map[int]string{80:conf.ServerAddress}
 
 	log.Println("Starting up with service id ", onion.ServiceID)
 
