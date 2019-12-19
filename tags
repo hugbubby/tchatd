@@ -1,0 +1,32 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_OUTPUT_MODE	u-ctags	/u-ctags or e-ctags/
+!_TAG_PROGRAM_AUTHOR	Universal Ctags Team	//
+!_TAG_PROGRAM_NAME	Universal Ctags	/Derived from Exuberant Ctags/
+!_TAG_PROGRAM_URL	https://ctags.io/	/official site/
+!_TAG_PROGRAM_VERSION	0.0.0	//
+Config	config.go	/^type Config struct {$/;"	s	package:main
+Config	main.go	/^	Config$/;"	M	struct:main.sendHandler	typeref:typename:Config
+Message	main.go	/^type Message []byte$/;"	t	package:main	typeref:typename:[]byte
+ReadCookie	config.go	/^	ReadCookie    string `json:"read_cookie"`$/;"	m	struct:main.Config	typeref:typename:string
+ServeHTTP	main.go	/^func (r readHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {$/;"	f	struct:main.readHandler
+ServeHTTP	main.go	/^func (s sendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {$/;"	f	struct:main.sendHandler
+ServerAddress	config.go	/^	ServerAddress string `json:"server_port"`$/;"	m	struct:main.Config	typeref:typename:string
+Tor	config.go	/^	Tor struct {$/;"	m	struct:main.Config	typeref:typename:struct { ControllerAddress string `json:"controller_address"`; }
+configDir	config.go	/^var configDir = os.Getenv("HOME") + "\/.config\/tchatd"$/;"	v	package:main
+configPath	config.go	/^func configPath(filename string) string {$/;"	f	package:main	typeref:typename:string
+conns	main.go	/^	conns     []*websocket.Conn$/;"	m	struct:main.hub	typeref:typename:[]*websocket.Conn
+cookie	main.go	/^	cookie string$/;"	m	struct:main.readHandler	typeref:typename:string
+hub	main.go	/^	hub$/;"	M	struct:main.readHandler	typeref:typename:hub
+hub	main.go	/^type hub struct {$/;"	s	package:main
+main	config.go	/^package main$/;"	p
+main	main.go	/^func main() {$/;"	f	package:main
+main	main.go	/^package main$/;"	p
+messenger	main.go	/^	messenger <-chan []byte$/;"	m	struct:main.hub	typeref:typename:<-chan []byte
+messenger	main.go	/^	messenger chan<- []byte$/;"	m	struct:main.sendHandler	typeref:typename:chan<- []byte
+pubKey	main.go	/^	pubKey ed25519.PublicKey$/;"	m	struct:main.sendHandler	typeref:typename:ed25519.PublicKey
+readHandler	main.go	/^type readHandler struct {$/;"	s	package:main
+register	main.go	/^func (h *hub) register(conn *websocket.Conn) {$/;"	f	struct:main.hub
+routeMessages	main.go	/^func (h *hub) routeMessages() {$/;"	f	struct:main.hub
+sendHandler	main.go	/^type sendHandler struct {$/;"	s	package:main
+tchat	README.md	/^# tchat$/;"	c
