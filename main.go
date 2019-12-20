@@ -10,19 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"reflect"
 	"syscall"
 
-	"golang.org/x/crypto/ed25519"
-
-	"github.com/gorilla/websocket"
 	. "github.com/hugbubby/tchatlib"
 	"github.com/hugbubby/torgo"
 	"github.com/pkg/errors"
 )
 
 func main() {
-
 	//Load configuration file from disk, or generate it if needed
 	conf, err := func() (Config, error) {
 		var config Config
@@ -47,7 +42,8 @@ func main() {
 			}
 		} else if os.IsNotExist(err) {
 			if err = os.MkdirAll(ConfigPath("."), 0755); err == nil {
-				config.ServerAddress = "127.0.0.1:29965"
+				config.PublicServerAddress = "127.0.0.1:29965"
+				config.PrivateServerAddress = "127.0.0.1:35565"
 				config.Tor.ProxyAddress = "127.0.0.1:9050"
 				config.Tor.ControllerAddress = "127.0.0.1:9051"
 				err = newCookie()
@@ -59,61 +55,50 @@ func main() {
 		log.Fatal(errors.Wrap(err, "error loading torchatd config"))
 	}
 
-	//Load private key from disk
-	_, privKey, err := GetKeys()
+	//Load private onion key from disk
+	_, onionPrivKey, err := GetKeys("onion_id_rsa")
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error loading public and private key from disk"))
 	}
 
 	//Load contact list map from disk
-	contacts, err := func() (map[string]Contact, error) {
-		ret := make(map[string]Contact)
+	contacts, err := func() (map[string]ContactDetails, error) {
+		ret := make(map[string]ContactDetails)
 		b, err := ioutil.ReadFile(ConfigPath("contacts"))
-		if err != nil {
-			if os.IsNotExist(err) {
-				b, err = json.Marshal(make([]Contact, 0))
-				log.Println("Warning: Make sure you add some contacts with your client, or no one can speak to you.")
-			}
-		} else {
-			var contact []Contact
-			if err = json.Unmarshal(b, &contact); err != nil {
+		if err == nil {
+			var list ContactList
+			if err = json.Unmarshal(b, &list); err != nil {
 				return nil, err
 			} else {
-				for _, v := range contact {
-					serviceID, err := torgo.ServiceIDFromEd25519(v.PubKey)
-					if err != nil {
-						return ret, err
-					} else {
-						ret[serviceID] = v
-					}
-				}
+                ret = list.Contacts
 			}
 		}
 		return ret, err
 	}()
 	if err != nil {
-		log.Fatal(errors.Wrap(err, "error loading public and private key from disk"))
+		log.Fatal(errors.Wrap(err, "error loading contacts from disk"))
 	}
 
-	//Spin up server
+	//Get tchat public key from disk
+	tchatPubKey, tchatPrivKey, err := GetKeys("tchat_id_ecc")
+	if err != nil {
+		log.Fatal(errors.Wrap(err, "error loading tchat keys from disk"))
+	}
+
+	//Spin up onion server
+	onionServer := http.NewServeMux()
 	messenger := make(chan Message, 100)
-	http.Handle("/send", sendHandler{
+	onionServer.Handle("/send", remoteSendHandler{
 		Config:    conf,
 		messenger: messenger,
 		contacts:  contacts,
 	})
-	hub := hub{
-		messenger: messenger,
-	}
-	http.Handle("/read", readHandler{
-		cookie: conf.ReadCookie,
-		hub:    hub,
-	})
-	listener, err := net.Listen("tcp", conf.ServerAddress)
+	onionServer.HandleFunc("/key", getPubKeyHandler(tchatPubKey))
+	listener, err := net.Listen("tcp", conf.PublicServerAddress)
 	if err != nil {
-		log.Fatal(errors.Wrap(err, "error establish control of address "+conf.ServerAddress))
+		log.Fatal(errors.Wrap(err, "error establish control of address "+conf.PublicServerAddress))
 	}
-	go http.Serve(listener, nil)
+	go panic(http.Serve(listener, onionServer))
 
 	//Make new onion controller object
 	controller, err := torgo.NewController(conf.Tor.ControllerAddress)
@@ -127,16 +112,32 @@ func main() {
 	}
 
 	//Create onion service from privKey & configure
-	onion, err := torgo.OnionFromEd25519(privKey)
+	onion, err := torgo.OnionFromEd25519(onionPrivKey)
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error initializing tor hidden service"))
 	}
-    onion.Ports = map[int]string{80:conf.ServerAddress}
+	onion.Ports = map[int]string{80: conf.PublicServerAddress}
 
 	log.Println("Starting up with service id ", onion.ServiceID)
 
 	//Connect onion service
 	controller.AddOnion(onion)
+
+	//Start local client service
+	clientServer := http.NewServeMux()
+	hub := hub{
+		messenger: messenger,
+	}
+	clientServer.Handle("/read", localReadHandler{
+		cookie: conf.ReadCookie,
+		hub:    hub,
+	})
+	clientServer.Handle("/send", localSendHandler{
+		Config:  conf,
+		privKey: tchatPrivKey,
+	})
+	clientListener, err := net.Listen("tcp", conf.PrivateServerAddress)
+	go panic(http.Serve(clientListener, clientServer))
 
 	// Wait here until CTRL-C or other term signal is received.
 	sc := make(chan os.Signal, 1)
@@ -144,100 +145,4 @@ func main() {
 	<-sc
 
 	controller.DeleteOnion(onion.ServiceID)
-}
-
-type sendHandler struct {
-	Config
-	messenger chan<- Message
-	contacts  map[string]Contact
-}
-
-func (s sendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "POST" {
-		if err := req.ParseForm(); err != nil {
-			http.Error(w, "Could not parse form", http.StatusBadRequest)
-		} else {
-			if encodedMsg := req.FormValue("message"); encodedMsg == "" {
-				http.Error(w, "Lack of message", http.StatusBadRequest)
-			} else {
-				if msg_b, err := base64.RawStdEncoding.DecodeString(req.FormValue(encodedMsg)); err != nil {
-					http.Error(w, "Could not decode message", http.StatusBadRequest)
-				} else {
-					if encodedSig := req.FormValue("signature"); encodedSig == "" {
-						http.Error(w, "Lack of signature", http.StatusBadRequest)
-					} else {
-						if sig, err := base64.RawStdEncoding.DecodeString(req.FormValue("signature")); err != nil {
-							http.Error(w, "Could not decode signature", http.StatusBadRequest)
-						} else {
-							var msg Message
-							if err := json.Unmarshal(msg_b, &msg); err != nil {
-								http.Error(w, "Could not parse message", http.StatusBadRequest)
-							} else {
-								if contact, ok := s.contacts[msg.ServiceID]; !ok {
-									http.Error(w, "Not in contacts list", http.StatusForbidden)
-								} else {
-									if !ed25519.Verify(contact.PubKey, msg_b, sig) {
-										http.Error(w, "Invalid signature", http.StatusUnauthorized)
-									} else {
-										s.messenger <- msg
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	} else {
-		w.WriteHeader(http.StatusNotFound)
-	}
-}
-
-type readHandler struct {
-	cookie string
-	hub
-}
-
-func (r readHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	upgrader := websocket.Upgrader{
-		ReadBufferSize:  1024 * 64, //64KB
-		WriteBufferSize: 1024 * 64, //64KB
-	}
-	if conn, err := upgrader.Upgrade(w, req, nil); err != nil {
-		http.Error(w, "couldn't upgrade to websocket", http.StatusInternalServerError)
-	} else {
-		if mtype, p, err := conn.ReadMessage(); err != nil {
-			log.Println("failed to read cookie from websocket conn at", conn.RemoteAddr(), ":", err)
-			conn.Close()
-		} else if mtype != websocket.TextMessage || !reflect.DeepEqual(p, []byte(r.cookie)) {
-			conn.WriteMessage(websocket.TextMessage, []byte("denied"))
-			conn.Close()
-		} else {
-			conn.WriteMessage(websocket.TextMessage, []byte("accepted"))
-			r.hub.register(conn)
-		}
-	}
-}
-
-type hub struct {
-	messenger <-chan Message
-	conns     []*websocket.Conn
-}
-
-func (h *hub) register(conn *websocket.Conn) {
-	h.conns = append(h.conns, conn)
-}
-
-func (h *hub) routeMessages() {
-	for {
-		select {
-		case msg := <-h.messenger:
-			for _, v := range h.conns {
-				err := v.WriteJSON(msg)
-				if err != nil {
-					log.Println(errors.Wrap(err, "error sending message to websocket "+v.RemoteAddr().String()))
-				}
-			}
-		}
-	}
 }
