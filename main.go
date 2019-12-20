@@ -56,7 +56,7 @@ func main() {
 	}
 
 	//Load private onion key from disk
-	_, onionPrivKey, err := GetKeys("onion_id_rsa")
+	_, onionPrivKey, err := GetKeys("onion_id_ecc")
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error loading public and private key from disk"))
 	}
@@ -64,13 +64,23 @@ func main() {
 	//Load contact list map from disk
 	contacts, err := func() (map[string]ContactDetails, error) {
 		ret := make(map[string]ContactDetails)
-		b, err := ioutil.ReadFile(ConfigPath("contacts"))
-		if err == nil {
+		b, err := ioutil.ReadFile(ConfigPath("contacts.json"))
+		if os.IsNotExist(err) {
+			var list = ContactList{
+                Contacts: make(map[string]ContactDetails),
+            }
+            b, err = json.Marshal(&list)
+            if err != nil {
+                err = errors.Wrap(err, "No contacts file, so I attempted to marshal an empty one, but that also failed.")
+            } else if err := ioutil.WriteFile(ConfigPath("contacts.json"), b, 0644); err != nil {
+                err = errors.Wrap(err, "No contacts file, so I attempted to make an empty one, but that also failed.")
+            }
+		} else if err == nil {
 			var list ContactList
 			if err = json.Unmarshal(b, &list); err != nil {
 				return nil, err
 			} else {
-                ret = list.Contacts
+				ret = list.Contacts
 			}
 		}
 		return ret, err
@@ -98,7 +108,9 @@ func main() {
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "error establish control of address "+conf.PublicServerAddress))
 	}
-	go panic(http.Serve(listener, onionServer))
+	go func() {
+        panic(http.Serve(listener, onionServer))
+    }()
 
 	//Make new onion controller object
 	controller, err := torgo.NewController(conf.Tor.ControllerAddress)
@@ -118,7 +130,7 @@ func main() {
 	}
 	onion.Ports = map[int]string{80: conf.PublicServerAddress}
 
-	log.Println("Starting up with service id ", onion.ServiceID)
+	log.Println("Starting up with service id", onion.ServiceID+ ".")
 
 	//Connect onion service
 	controller.AddOnion(onion)
@@ -137,7 +149,13 @@ func main() {
 		privKey: tchatPrivKey,
 	})
 	clientListener, err := net.Listen("tcp", conf.PrivateServerAddress)
-	go panic(http.Serve(clientListener, clientServer))
+    if err != nil {
+		log.Fatal(errors.Wrap(err, "error establish control of address "+conf.PrivateServerAddress))
+    }
+	go func(){
+        panic(http.Serve(clientListener, clientServer))
+    }()
+    log.Println("Began intialization of client daemon too.")
 
 	// Wait here until CTRL-C or other term signal is received.
 	sc := make(chan os.Signal, 1)
