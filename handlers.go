@@ -29,11 +29,11 @@ func (s remoteSendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Could not parse form", http.StatusBadRequest)
 	} else if encodedMsg := req.FormValue("message"); encodedMsg == "" {
 		http.Error(w, "Lack of message", http.StatusBadRequest)
-	} else if msg_b, err := base64.RawStdEncoding.DecodeString(encodedMsg); err != nil {
+	} else if msg_b, err := base64.StdEncoding.DecodeString(encodedMsg); err != nil {
 		http.Error(w, errors.Wrap(err, "Could not decode message " + encodedMsg).Error(), http.StatusBadRequest)
 	} else if encodedSig := req.FormValue("signature"); encodedSig == "" {
 		http.Error(w, "Lack of signature", http.StatusBadRequest)
-	} else if sig, err := base64.RawStdEncoding.DecodeString(encodedSig); err != nil {
+	} else if sig, err := base64.StdEncoding.DecodeString(encodedSig); err != nil {
 		http.Error(w, errors.Wrap(err, "Could not decode signature " + encodedSig).Error(), http.StatusBadRequest)
 	} else {
 		var msg Message
