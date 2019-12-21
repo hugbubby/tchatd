@@ -30,11 +30,11 @@ func (s remoteSendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	} else if encodedMsg := req.FormValue("message"); encodedMsg == "" {
 		http.Error(w, "Lack of message", http.StatusBadRequest)
 	} else if msg_b, err := base64.RawStdEncoding.DecodeString(encodedMsg); err != nil {
-		http.Error(w, "Could not decode message", http.StatusBadRequest)
+		http.Error(w, errors.Wrap(err, "Could not decode message").Error(), http.StatusBadRequest)
 	} else if encodedSig := req.FormValue("signature"); encodedSig == "" {
 		http.Error(w, "Lack of signature", http.StatusBadRequest)
 	} else if sig, err := base64.RawStdEncoding.DecodeString(encodedSig); err != nil {
-		http.Error(w, "Could not decode signature", http.StatusBadRequest)
+		http.Error(w, errors.Wrap(err, "Could not decode signature").Error(), http.StatusBadRequest)
 	} else {
 		var msg Message
 		if err := json.Unmarshal(msg_b, &msg); err != nil {
@@ -99,7 +99,7 @@ func (s localSendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	} else if err := req.ParseForm(); err != nil {
 		http.Error(w, errors.Wrap(err, "error parsing form").Error(), http.StatusBadRequest)
 	} else if destination := req.FormValue("destination"); !torgo.IsValidHiddenServiceId(destination) {
-		http.Error(w, "invalid onion id as destination", http.StatusBadRequest)
+		http.Error(w, "invalid onion id as destination "+destination, http.StatusBadRequest)
 	} else if message := req.FormValue("message"); message == "" {
 		http.Error(w, "no message included in request", http.StatusBadRequest)
 	} else if c, err := torgo.NewClient(s.Tor.ProxyAddress); err != nil {
@@ -108,19 +108,19 @@ func (s localSendHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		sig_b := ed25519.Sign(s.privKey, []byte(message))
 		sig_enc := base64.StdEncoding.EncodeToString(sig_b)
 		msg_enc := base64.StdEncoding.EncodeToString([]byte(message))
-		if resp, err := c.PostForm(destination+"/send", map[string][]string{
+		if resp, err := c.PostForm("http://"+destination+".onion/send", map[string][]string{
 			"signature": []string{sig_enc},
 			"message":   []string{msg_enc},
 		}); err != nil {
-			http.Error(w, errors.Wrap(err, "error sending message").Error(), http.StatusInternalServerError)
+			http.Error(w, errors.Wrap(err, "error sending message to remote tchat server").Error(), http.StatusInternalServerError)
 		} else if resp.StatusCode != 200 {
 			if b, err := ioutil.ReadAll(resp.Body); err != nil {
 				http.Error(w, fmt.Sprintf("recipient returned %d status code but we were unable to read the body",
 					resp.StatusCode), http.StatusInternalServerError)
 			} else {
-                http.Error(w, fmt.Sprintf("recipient returned %d status code and: %s",
+				http.Error(w, fmt.Sprintf("recipient returned %d status code and: %s",
 					resp.StatusCode, string(b)), http.StatusInternalServerError)
-            }
+			}
 		}
 	}
 }
